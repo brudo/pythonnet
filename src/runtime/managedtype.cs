@@ -28,12 +28,16 @@ namespace Python.Runtime
                     tp = ob;
                 }
 
-                var flags = (int)Marshal.ReadIntPtr(tp, TypeOffset.tp_flags);
+                var flags = Util.ReadCLong(tp, TypeOffset.tp_flags);
                 if ((flags & TypeFlags.Managed) != 0)
                 {
                     IntPtr op = tp == ob
                         ? Marshal.ReadIntPtr(tp, TypeOffset.magic())
                         : Marshal.ReadIntPtr(ob, ObjectOffset.magic(ob));
+                    if (op == IntPtr.Zero)
+                    {
+                        return null;
+                    }
                     var gc = (GCHandle)op;
                     return (ManagedType)gc.Target;
                 }
@@ -63,7 +67,7 @@ namespace Python.Runtime
                     tp = ob;
                 }
 
-                var flags = (int)Marshal.ReadIntPtr(tp, TypeOffset.tp_flags);
+                var flags = Util.ReadCLong(tp, TypeOffset.tp_flags);
                 if ((flags & TypeFlags.Managed) != 0)
                 {
                     return true;

@@ -1,6 +1,9 @@
 version: '{branch}-{build}'
 build: off
 
+image:
+  - Visual Studio 2017
+  
 platform:
   - x86
   - x64
@@ -9,67 +12,69 @@ environment:
   global:
     PYTHONUNBUFFERED: True
     PYTHONWARNINGS: 'ignore:::wheel.pep425tags:'
-    PYTHONPATH: C:\testdir
-    NUNIT: nunit-console
-    CONDA_BLD: C:\conda
-    CONDA_BLD_VERSION: 3.5
-
-    # SDK v7.0 MSVC Express 2008's SetEnv.cmd script will fail if the
-    # /E:ON and /V:ON options are not enabled in the batch script interpreter
-    # See: http://stackoverflow.com/a/13751649/163740
-    CMD_IN_ENV: 'cmd /E:ON /V:ON /C .\ci\run_with_env.cmd'
+    CODECOV_ENV: PYTHON_VERSION, PLATFORM
 
   matrix:
+    - PYTHON_VERSION: 2.7 
+      BUILD_OPTS: --xplat
+    - PYTHON_VERSION: 3.5
+      BUILD_OPTS: --xplat
+    - PYTHON_VERSION: 3.6
+      BUILD_OPTS: --xplat
+    - PYTHON_VERSION: 3.7
+      BUILD_OPTS: --xplat
     - PYTHON_VERSION: 2.7
-    - PYTHON_VERSION: 3.3
-    - PYTHON_VERSION: 3.4
     - PYTHON_VERSION: 3.5
     - PYTHON_VERSION: 3.6
+    - PYTHON_VERSION: 3.7
+
+matrix:
+    allow_failures:
+      - PYTHON_VERSION: 3.4
+        BUILD_OPTS: --xplat
+      - PYTHON_VERSION: 3.4
 
 init:
-  # Prepare environment
-  - mkdir C:\testdir
-
-  # Set environment variables depending based on build cfg
-  - set CONDA_PY=%PYTHON_VERSION:.=%
-  - set CONDA_BLD_ARCH=%PLATFORM:x=%
-  - set PYTHON=C:\PYTHON%PYTHON_VERSION:.=%
-  - if %PLATFORM%==x86 (set CONDA_BLD_ARCH=32)
-  - if %PLATFORM%==x86 (set NUNIT=%NUNIT%-x86)
+  # Update Environment Variables based on matrix/platform
+  - set PY_VER=%PYTHON_VERSION:.=%
+  - set PYTHON=C:\PYTHON%PY_VER%
   - if %PLATFORM%==x64 (set PYTHON=%PYTHON%-x64)
 
-  # Prepend newly installed Python to the PATH of this build
+  # Put desired Python version first in PATH
   - set PATH=%PYTHON%;%PYTHON%\Scripts;%PATH%
 
-  # Check that we have the expected version, architecture for Python
-  - python --version
-  - python -c "import struct; print(struct.calcsize('P') * 8)"
-  - python -c "import ctypes; print(ctypes.sizeof(ctypes.c_wchar))"
-
 install:
-  # install for wheels & coverage
-  - pip install --upgrade pip wheel coverage codecov
+  - python -m pip install -U pip
+  - pip install --upgrade -r requirements.txt --quiet
 
-  # Install OpenCover. Can't put on packages.config; not Linux/Mono compatible
-  - .\tools\nuget\nuget.exe install OpenCover -OutputDirectory packages
+  # Install OpenCover. Can't put on `packages.config`, not Mono compatible
+  - .\tools\nuget\nuget.exe install OpenCover -OutputDirectory packages -Verbosity quiet
 
 build_script:
-  # build clean sdist & wheel with coverage of setup.py, install local wheel
-  - coverage run setup.py sdist bdist_wheel
+  # Create clean `sdist`. Only used for releases
+  - python setup.py --quiet sdist
+  # Build `wheel` with coverage of `setup.py`
+  - coverage run setup.py bdist_wheel %BUILD_OPTS%
 
 test_script:
   - pip install --no-index --find-links=.\dist\ pythonnet
-  - ps: Copy-Item (Resolve-Path .\build\*\Python.Test.dll) C:\testdir
-
-  # Test runner
   - ps: .\ci\appveyor_run_tests.ps1
-
-  # Build conda-recipe on Pull Requests
   - ps: .\ci\appveyor_build_recipe.ps1
 
 on_finish:
-  # Upload coverage
-  - codecov
+  # Temporary disable multiple upload due to codecov limit of 20 per commit.
+  # https://docs.codecov.io/blog/week-8-2017
+  - coverage xml -i
+  # - codecov --file coverage.xml --flags setup_windows
+  # - codecov --file py.coverage --flags python_tests
+  # - codecov --file cs.coverage --flags embedded_tests
+  - codecov --file py.coverage cs.coverage coverage.xml --flags setup_windows
 
 artifacts:
   - path: dist\*
+  - path: '.\src\runtime\bin\*.nupkg'
+
+notifications:
+  - provider: Slack
+    incoming_webhook:
+      secure: 2S/t6rGHdbwoxehnvn5KgfsHrBFEtwnPD7M5olGErmz70oWFVpqoWd/EvDwh7rKZGdOTjDmpwcukc2xi5VRaGHbBAqFYS3tAdgAMrcaTNWs=

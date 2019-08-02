@@ -5,23 +5,36 @@ using Python.Runtime;
 
 namespace Python.EmbeddingTest
 {
-    [TestFixture]
+    /// <summary>
+    /// Test Import unittests and regressions
+    /// </summary>
+    /// <remarks>
+    /// Keeping in old-style SetUp/TearDown due to required SetUp.
+    /// The required directory structure was added to .\pythonnet\src\embed_tests\fixtures\ directory:
+    /// + PyImportTest/
+    /// | - __init__.py
+    /// | + test/
+    /// | | - __init__.py
+    /// | | - one.py
+    /// </remarks>
     public class PyImportTest
     {
-        private IntPtr gs;
+        private IntPtr _gs;
 
         [SetUp]
         public void SetUp()
         {
             PythonEngine.Initialize();
-            gs = PythonEngine.AcquireLock();
+            _gs = PythonEngine.AcquireLock();
 
             /* Append the tests directory to sys.path
              * using reflection to circumvent the private
-             * modifiers placed on most Runtime methods.
-             */
-            const string s = @"../../tests";
-
+             * modifiers placed on most Runtime methods. */
+#if NETCOREAPP
+            const string s = "../../fixtures";
+#else
+            const string s = "../fixtures";
+#endif
             string testPath = Path.Combine(TestContext.CurrentContext.TestDirectory, s);
 
             IntPtr str = Runtime.Runtime.PyString_FromString(testPath);
@@ -30,28 +43,20 @@ namespace Python.EmbeddingTest
         }
 
         [TearDown]
-        public void TearDown()
+        public void Dispose()
         {
-            PythonEngine.ReleaseLock(gs);
+            PythonEngine.ReleaseLock(_gs);
             PythonEngine.Shutdown();
         }
 
         /// <summary>
         /// Test subdirectory import
         /// </summary>
-        /// <remarks>
-        /// The required directory structure was added to .\pythonnet\src\tests\ directory:
-        /// + PyImportTest/
-        /// | - __init__.py
-        /// | + test/
-        /// | | - __init__.py
-        /// | | - one.py
-        /// </remarks>
         [Test]
         public void TestDottedName()
         {
             PyObject module = PythonEngine.ImportModule("PyImportTest.test.one");
-            Assert.IsNotNull(module, ">>>  import PyImportTest.test.one  # FAILED");
+            Assert.IsNotNull(module);
         }
 
         /// <summary>
@@ -61,7 +66,22 @@ namespace Python.EmbeddingTest
         public void TestSysArgsImportException()
         {
             PyObject module = PythonEngine.ImportModule("PyImportTest.sysargv");
-            Assert.IsNotNull(module, ">>>  import PyImportTest.sysargv  # FAILED");
+            Assert.IsNotNull(module);
+        }
+
+        /// <summary>
+        /// Test Global Variable casting. GH#420
+        /// </summary>
+        [Test]
+        public void TestCastGlobalVar()
+        {
+            dynamic foo = Py.Import("PyImportTest.cast_global_var");
+            Assert.AreEqual("1", foo.FOO.ToString());
+            Assert.AreEqual("1", foo.test_foo().ToString());
+
+            foo.FOO = 2;
+            Assert.AreEqual("2", foo.FOO.ToString());
+            Assert.AreEqual("2", foo.test_foo().ToString());
         }
     }
 }

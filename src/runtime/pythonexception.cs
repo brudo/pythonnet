@@ -6,22 +6,21 @@ namespace Python.Runtime
     /// Provides a managed interface to exceptions thrown by the Python
     /// runtime.
     /// </summary>
-    public class PythonException : System.Exception
+    public class PythonException : System.Exception, IPyDisposable
     {
         private IntPtr _pyType = IntPtr.Zero;
         private IntPtr _pyValue = IntPtr.Zero;
         private IntPtr _pyTB = IntPtr.Zero;
         private string _tb = "";
         private string _message = "";
+        private string _pythonTypeName = "";
         private bool disposed = false;
+        private bool _finalized = false;
 
         public PythonException()
         {
             IntPtr gs = PythonEngine.AcquireLock();
             Runtime.PyErr_Fetch(ref _pyType, ref _pyValue, ref _pyTB);
-            Runtime.XIncref(_pyType);
-            Runtime.XIncref(_pyValue);
-            Runtime.XIncref(_pyTB);
             if (_pyType != IntPtr.Zero && _pyValue != IntPtr.Zero)
             {
                 string type;
@@ -33,6 +32,8 @@ namespace Python.Runtime
                     type = pyTypeName.ToString();
                 }
 
+                _pythonTypeName = type;
+
                 Runtime.XIncref(_pyValue);
                 using (var pyValue = new PyObject(_pyValue))
                 {
@@ -42,11 +43,13 @@ namespace Python.Runtime
             }
             if (_pyTB != IntPtr.Zero)
             {
-                PyObject tb_module = PythonEngine.ImportModule("traceback");
-                Runtime.XIncref(_pyTB);
-                using (var pyTB = new PyObject(_pyTB))
+                using (PyObject tb_module = PythonEngine.ImportModule("traceback"))
                 {
-                    _tb = tb_module.InvokeMethod("format_tb", pyTB).ToString();
+                    Runtime.XIncref(_pyTB);
+                    using (var pyTB = new PyObject(_pyTB))
+                    {
+                        _tb = tb_module.InvokeMethod("format_tb", pyTB).ToString();
+                    }
                 }
             }
             PythonEngine.ReleaseLock(gs);
@@ -57,7 +60,12 @@ namespace Python.Runtime
 
         ~PythonException()
         {
-            Dispose();
+            if (_finalized || disposed)
+            {
+                return;
+            }
+            _finalized = true;
+            Finalizer.Instance.AddFinalizedObject(this);
         }
 
         /// <summary>
@@ -125,9 +133,16 @@ namespace Python.Runtime
         /// </remarks>
         public override string StackTrace
         {
-            get { return _tb; }
+            get { return _tb + base.StackTrace; }
         }
 
+        /// <summary>
+        /// Python error type name.
+        /// </summary>
+        public string PythonTypeName
+        {
+            get { return _pythonTypeName; }
+        }
 
         /// <summary>
         /// Dispose Method
@@ -135,12 +150,14 @@ namespace Python.Runtime
         /// <remarks>
         /// The Dispose method provides a way to explicitly release the
         /// Python objects represented by a PythonException.
+        /// If object not properly disposed can cause AppDomain unload issue.
+        /// See GH#397 and GH#400.
         /// </remarks>
         public void Dispose()
         {
             if (!disposed)
             {
-                if (Runtime.Py_IsInitialized() > 0)
+                if (Runtime.Py_IsInitialized() > 0 && !Runtime.IsFinalizing)
                 {
                     IntPtr gs = PythonEngine.AcquireLock();
                     Runtime.XDecref(_pyType);
@@ -155,6 +172,11 @@ namespace Python.Runtime
                 GC.SuppressFinalize(this);
                 disposed = true;
             }
+        }
+
+        public IntPtr[] GetTrackedHandles()
+        {
+            return new IntPtr[] { _pyType, _pyValue, _pyTB };
         }
 
         /// <summary>

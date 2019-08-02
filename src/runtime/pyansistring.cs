@@ -44,11 +44,8 @@ namespace Python.Runtime
         /// </remarks>
         public PyAnsiString(string s)
         {
-            obj = Runtime.PyString_FromStringAndSize(s, s.Length);
-            if (obj == IntPtr.Zero)
-            {
-                throw new PythonException();
-            }
+            obj = Runtime.PyString_FromString(s);
+            Runtime.CheckExceptionOccurred();
         }
 
 

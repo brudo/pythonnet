@@ -116,6 +116,71 @@ namespace Python.Test
             return args;
         }
 
+        public static string TestOverloadedNoObject(int i)
+        {
+            return "Got int";
+        }
+
+        public static string TestOverloadedObject(int i)
+        {
+            return "Got int";
+        }
+
+        public static string TestOverloadedObject(object o)
+        {
+            return "Got object";
+        }
+
+        public static string TestOverloadedObjectTwo(int a, int b)
+        {
+            return "Got int-int";
+        }
+
+        public static string TestOverloadedObjectTwo(string a, string b)
+        {
+            return "Got string-string";
+        }
+
+        public static string TestOverloadedObjectTwo(string a, int b)
+        {
+            return "Got string-int";
+        }
+
+        public static string TestOverloadedObjectTwo(string a, object b)
+        {
+            return "Got string-object";
+        }
+
+        public static string TestOverloadedObjectTwo(int a, object b)
+        {
+            return "Got int-object";
+        }
+
+        public static string TestOverloadedObjectTwo(object a, int b)
+        {
+            return "Got object-int";
+        }
+
+        public static string TestOverloadedObjectTwo(object a, object b)
+        {
+            return "Got object-object";
+        }
+
+        public static string TestOverloadedObjectTwo(int a, string b)
+        {
+            return "Got int-string";
+        }
+
+        public static string TestOverloadedObjectThree(object a, int b)
+        {
+            return "Got object-int";
+        }
+
+        public static string TestOverloadedObjectThree(int a, object b)
+        {
+            return "Got int-object";
+        }
+
         public static bool TestStringOutParams(string s, out string s1)
         {
             s1 = "output string";
@@ -576,6 +641,16 @@ namespace Python.Test
         {
             return i;
         }
+
+        public static string CaseSensitive()
+        {
+            return "CaseSensitive";
+        }
+
+        public static string Casesensitive()
+        {
+            return "Casesensitive";
+        }
     }
 
 
@@ -589,5 +664,25 @@ namespace Python.Test
         {
             return echo;
         }
+    }
+}
+
+namespace PlainOldNamespace
+{
+    public class PlainOldClass
+    {
+        public PlainOldClass() { }
+
+        public PlainOldClass(int param) { }
+
+        private readonly byte[] payload = new byte[(int)Math.Pow(2, 20)]; //1 MB
+
+        public void NonGenericMethod() { }
+
+        public void GenericMethod<T>() { }
+
+        public void OverloadedMethod() { }
+
+        public void OverloadedMethod(int param) { }
     }
 }

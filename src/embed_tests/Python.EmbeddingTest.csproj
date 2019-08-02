@@ -13,8 +13,8 @@
     <TargetFrameworkProfile />
     <NoWarn>1591</NoWarn>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\</SolutionDir>
-    <PythonBuildDir Condition=" '$(PythonBuildDir)' == '' ">$(SolutionDir)</PythonBuildDir>
-    <!--If need to freeze language version: <LangVersion>5</LangVersion> !-->
+    <PythonBuildDir Condition=" '$(PythonBuildDir)' == '' ">$(SolutionDir)\bin\</PythonBuildDir>
+    <LangVersion>6</LangVersion>
     <RestorePackages>true</RestorePackages>
     <ErrorReport>prompt</ErrorReport>
   </PropertyGroup>
@@ -30,7 +30,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseMono'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -40,7 +41,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseWin'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -50,7 +52,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseMonoPY3'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -60,13 +63,15 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseWinPY3'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="nunit.framework, Version=2.6.4.14350, Culture=neutral, PublicKeyToken=96d09a1eb7f44a77, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\NUnit.2.6.4\lib\nunit.framework.dll</HintPath>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="nunit.framework, Version=3.7.1.0, Culture=neutral, PublicKeyToken=2638cd05610744eb, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\NUnit.3.7.1\lib\net40\nunit.framework.dll</HintPath>
     </Reference>
     <Reference Include="System" />
   </ItemGroup>
@@ -75,12 +80,33 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="InitializeTest.cs" />
+    <Compile Include="dynamic.cs" />
     <Compile Include="pyimport.cs" />
-    <Compile Include="pyiter.cs" />
-    <Compile Include="pylong.cs" />
-    <Compile Include="pyobject.cs" />
-    <Compile Include="pythonexception.cs" />
+    <Compile Include="pyinitialize.cs" />
+    <Compile Include="pyrunstring.cs" />
+    <Compile Include="TestConverter.cs" />
+    <Compile Include="TestCustomMarshal.cs" />
+    <Compile Include="TestDomainReload.cs" />
+    <Compile Include="TestExample.cs" />
+    <Compile Include="TestFinalizer.cs" />
+    <Compile Include="TestPyAnsiString.cs" />
+    <Compile Include="TestPyFloat.cs" />
+    <Compile Include="TestPyInt.cs" />
+    <Compile Include="TestPyList.cs" />
+    <Compile Include="TestPyLong.cs" />
+    <Compile Include="TestPyNumber.cs" />
+    <Compile Include="TestPyObject.cs" />
+    <Compile Include="TestPySequence.cs" />
+    <Compile Include="TestPyString.cs" />
+    <Compile Include="TestPythonException.cs" />
+    <Compile Include="TestPythonEngineProperties.cs" />
+    <Compile Include="TestPyTuple.cs" />
+    <Compile Include="TestNamedArguments.cs" />
+    <Compile Include="TestPyWith.cs" />
+    <Compile Include="TestRuntime.cs" />
+    <Compile Include="TestPyScope.cs" />
+    <Compile Include="TestTypeManager.cs" />
+    <Compile Include="GlobalTestsSetup.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\runtime\Python.Runtime.csproj">
@@ -98,6 +124,6 @@
   </PropertyGroup>
   <Target Name="AfterBuild">
     <Copy SourceFiles="$(TargetAssembly)" DestinationFolder="$(PythonBuildDir)" />
-    <Copy SourceFiles="$(TargetAssemblyPdb)" Condition="Exists('$(TargetAssemblyPdb)')" DestinationFolder="$(PythonBuildDir)" />
+    <!--Copy SourceFiles="$(TargetAssemblyPdb)" Condition="Exists('$(TargetAssemblyPdb)')" DestinationFolder="$(PythonBuildDir)" /-->
   </Target>
 </Project>

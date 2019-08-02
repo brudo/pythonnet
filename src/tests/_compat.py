@@ -6,6 +6,7 @@ Using Python 3 syntax to encourage upgrade unless otherwise noted.
 """
 
 import operator
+import subprocess
 import sys
 import types
 
@@ -33,7 +34,7 @@ if PY3:
     unicode = str
 
     # from nowhere import Nothing
-    cmp = lambda a, b: (a > b) - (a < b)  # No Py3 equivalent
+    cmp = lambda a, b: (a > b) - (a < b)  # No PY3 equivalent
     map = map
     range = range
     zip = zip
@@ -63,3 +64,11 @@ elif PY2:
     map = imap
     range = xrange
     zip = izip
+
+
+def check_output(*args, **kwargs):
+    """Check output wrapper for PY2/PY3 compatibility"""
+    output = subprocess.check_output(*args, **kwargs)
+    if PY2:
+        return output
+    return output.decode("ascii")

@@ -55,9 +55,7 @@ namespace Python.Runtime
                 return Exceptions.RaiseTypeError("No match found for given type params");
             }
 
-            var mb = new MethodBinding(self.m, self.target);
-            mb.info = mi;
-            Runtime.XIncref(mb.pyHandle);
+            var mb = new MethodBinding(self.m, self.target) { info = mi };
             return mb.pyHandle;
         }
 
@@ -76,22 +74,20 @@ namespace Python.Runtime
             }
 
             string name = Runtime.GetManagedString(key);
-            if (name == "__doc__")
+            switch (name)
             {
-                IntPtr doc = self.m.GetDocString();
-                Runtime.XIncref(doc);
-                return doc;
+                case "__doc__":
+                    IntPtr doc = self.m.GetDocString();
+                    Runtime.XIncref(doc);
+                    return doc;
+                // FIXME: deprecate __overloads__ soon...
+                case "__overloads__":
+                case "Overloads":
+                    var om = new OverloadMapper(self.m, self.target);
+                    return om.pyHandle;
+                default:
+                    return Runtime.PyObject_GenericGetAttr(ob, key);
             }
-
-            // FIXME: deprecate __overloads__ soon...
-            if (name == "__overloads__" || name == "Overloads")
-            {
-                var om = new OverloadMapper(self.m, self.target);
-                Runtime.XIncref(om.pyHandle);
-                return om.pyHandle;
-            }
-
-            return Runtime.PyObject_GenericGetAttr(ob, key);
         }
 
 
@@ -108,7 +104,7 @@ namespace Python.Runtime
             {
                 if (self.info.IsGenericMethod)
                 {
-                    int len = Runtime.PyTuple_Size(args); //FIXME: Never used
+                    var len = Runtime.PyTuple_Size(args); //FIXME: Never used
                     Type[] sigTp = Runtime.PythonArgsToTypeArray(args, true);
                     if (sigTp != null)
                     {
@@ -133,7 +129,7 @@ namespace Python.Runtime
 
                 if (target == IntPtr.Zero && !self.m.IsStatic())
                 {
-                    int len = Runtime.PyTuple_Size(args);
+                    var len = Runtime.PyTuple_Size(args);
                     if (len < 1)
                     {
                         Exceptions.SetError(Exceptions.TypeError, "not enough arguments");
@@ -231,8 +227,8 @@ namespace Python.Runtime
         {
             var self = (MethodBinding)GetManagedObject(ob);
             string type = self.target == IntPtr.Zero ? "unbound" : "bound";
-            string s = string.Format("<{0} method '{1}'>", type, self.m.name);
-            return Runtime.PyString_FromStringAndSize(s, s.Length);
+            string name = self.m.name;
+            return Runtime.PyString_FromString($"<{type} method '{name}'>");
         }
 
         /// <summary>

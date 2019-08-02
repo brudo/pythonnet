@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Resources;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
@@ -27,6 +28,12 @@ namespace Python.Runtime
         private static Dictionary<Tuple<string, string>, ModuleBuilder> moduleBuilders;
 
         static ClassDerivedObject()
+        {
+            assemblyBuilders = new Dictionary<string, AssemblyBuilder>();
+            moduleBuilders = new Dictionary<Tuple<string, string>, ModuleBuilder>();
+        }
+
+        public static void Reset()
         {
             assemblyBuilders = new Dictionary<string, AssemblyBuilder>();
             moduleBuilders = new Dictionary<Tuple<string, string>, ModuleBuilder>();
@@ -737,7 +744,7 @@ namespace Python.Runtime
 
             if (origMethodName == null)
             {
-                throw new NotImplementedException("Python object does not have a '" + methodName + "' method");
+                throw new NotImplementedException($"Python object does not have a '{methodName}' method");
             }
 
             obj.GetType().InvokeMember(origMethodName,
@@ -808,7 +815,6 @@ namespace Python.Runtime
                 obj,
                 args);
 
-            var disposeList = new List<PyObject>();
             CLRObject self = null;
             IntPtr gs = Runtime.PyGILState_Ensure();
             try
@@ -821,42 +827,9 @@ namespace Python.Runtime
                 // object to be collected.
                 FieldInfo fi = obj.GetType().GetField("__pyobj__");
                 fi.SetValue(obj, self);
-
-                Runtime.XIncref(self.pyHandle);
-                var pyself = new PyObject(self.pyHandle);
-                disposeList.Add(pyself);
-
-                Runtime.XIncref(Runtime.PyNone);
-                var pynone = new PyObject(Runtime.PyNone);
-                disposeList.Add(pynone);
-
-                // call __init__
-                PyObject init = pyself.GetAttr("__init__", pynone);
-                disposeList.Add(init);
-                if (init.Handle != Runtime.PyNone)
-                {
-                    // if __init__ hasn't been overridden then it will be a managed object
-                    ManagedType managedMethod = ManagedType.GetManagedObject(init.Handle);
-                    if (null == managedMethod)
-                    {
-                        var pyargs = new PyObject[args.Length];
-                        for (var i = 0; i < args.Length; ++i)
-                        {
-                            pyargs[i] = new PyObject(Converter.ToPython(args[i], args[i]?.GetType()));
-                            disposeList.Add(pyargs[i]);
-                        }
-
-                        disposeList.Add(init.Invoke(pyargs));
-                    }
-                }
             }
             finally
             {
-                foreach (PyObject x in disposeList)
-                {
-                    x?.Dispose();
-                }
-
                 // Decrement the python object's reference count.
                 // This doesn't actually destroy the object, it just sets the reference to this object
                 // to be a weak reference and it will be destroyed when the C# object is destroyed.

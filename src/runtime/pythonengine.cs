@@ -1,9 +1,9 @@
 using System;
-using System.IO;
-using System.Threading;
-using System.Reflection;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Python.Runtime
 {
@@ -14,6 +14,9 @@ namespace Python.Runtime
     {
         private static DelegateManager delegateManager;
         private static bool initialized;
+        private static IntPtr _pythonHome = IntPtr.Zero;
+        private static IntPtr _programName = IntPtr.Zero;
+        private static IntPtr _pythonPath = IntPtr.Zero;
 
         public PythonEngine()
         {
@@ -57,62 +60,74 @@ namespace Python.Runtime
         {
             get
             {
-                string result = Runtime.Py_GetProgramName();
-                if (result == null)
-                {
-                    return "";
-                }
-                return result;
+                IntPtr p = Runtime.Py_GetProgramName();
+                return UcsMarshaler.PtrToPy3UnicodePy2String(p) ?? "";
             }
-            set { Runtime.Py_SetProgramName(value); }
+            set
+            {
+                Marshal.FreeHGlobal(_programName);
+                _programName = UcsMarshaler.Py3UnicodePy2StringtoPtr(value);
+                Runtime.Py_SetProgramName(_programName);
+            }
         }
 
         public static string PythonHome
         {
             get
             {
-                string result = Runtime.Py_GetPythonHome();
-                if (result == null)
-                {
-                    return "";
-                }
-                return result;
+                IntPtr p = Runtime.Py_GetPythonHome();
+                return UcsMarshaler.PtrToPy3UnicodePy2String(p) ?? "";
             }
-            set { Runtime.Py_SetPythonHome(value); }
+            set
+            {
+                Marshal.FreeHGlobal(_pythonHome);
+                _pythonHome = UcsMarshaler.Py3UnicodePy2StringtoPtr(value);
+                Runtime.Py_SetPythonHome(_pythonHome);
+            }
         }
 
         public static string PythonPath
         {
             get
             {
-                string result = Runtime.Py_GetPath();
-                if (result == null)
-                {
-                    return "";
-                }
-                return result;
+                IntPtr p = Runtime.Py_GetPath();
+                return UcsMarshaler.PtrToPy3UnicodePy2String(p) ?? "";
             }
-            set { Runtime.Py_SetPath(value); }
+            set
+            {
+                if (Runtime.IsPython2)
+                {
+                    throw new NotSupportedException("Set PythonPath not supported on Python 2");
+                }
+                Marshal.FreeHGlobal(_pythonPath);
+                _pythonPath = UcsMarshaler.Py3UnicodePy2StringtoPtr(value);
+                Runtime.Py_SetPath(_pythonPath);
+            }
         }
 
         public static string Version
         {
-            get { return Runtime.Py_GetVersion(); }
+            get { return Marshal.PtrToStringAnsi(Runtime.Py_GetVersion()); }
         }
 
         public static string BuildInfo
         {
-            get { return Runtime.Py_GetBuildInfo(); }
+            get { return Marshal.PtrToStringAnsi(Runtime.Py_GetBuildInfo()); }
         }
 
         public static string Platform
         {
-            get { return Runtime.Py_GetPlatform(); }
+            get { return Marshal.PtrToStringAnsi(Runtime.Py_GetPlatform()); }
         }
 
         public static string Copyright
         {
-            get { return Runtime.Py_GetCopyright(); }
+            get { return Marshal.PtrToStringAnsi(Runtime.Py_GetCopyright()); }
+        }
+
+        public static string Compiler
+        {
+            get { return Marshal.PtrToStringAnsi(Runtime.Py_GetCompiler()); }
         }
 
         public static int RunSimpleString(string code)
@@ -122,7 +137,12 @@ namespace Python.Runtime
 
         public static void Initialize()
         {
-            Initialize(Enumerable.Empty<string>());
+            Initialize(setSysArgv: true);
+        }
+
+        public static void Initialize(bool setSysArgv = true, bool initSigs = false)
+        {
+            Initialize(Enumerable.Empty<string>(), setSysArgv: setSysArgv, initSigs: initSigs);
         }
 
         /// <summary>
@@ -133,8 +153,9 @@ namespace Python.Runtime
         /// more than once, though initialization will only happen on the
         /// first call. It is *not* necessary to hold the Python global
         /// interpreter lock (GIL) to call this method.
+        /// initSigs can be set to 1 to do default python signal configuration. This will override the way signals are handled by the application.
         /// </remarks>
-        public static void Initialize(IEnumerable<string> args)
+        public static void Initialize(IEnumerable<string> args, bool setSysArgv = true, bool initSigs = false)
         {
             if (!initialized)
             {
@@ -144,11 +165,24 @@ namespace Python.Runtime
                 // during an initial "import clr", and the world ends shortly thereafter.
                 // This is probably masking some bad mojo happening somewhere in Runtime.Initialize().
                 delegateManager = new DelegateManager();
-                Runtime.Initialize();
+                Runtime.Initialize(initSigs);
                 initialized = true;
                 Exceptions.Clear();
 
-                Py.SetArgv(args);
+                // Make sure we clean up properly on app domain unload.
+                AppDomain.CurrentDomain.DomainUnload += OnDomainUnload;
+
+                // Remember to shut down the runtime.
+                AddShutdownHandler(Runtime.Shutdown);
+
+                // The global scope gets used implicitly quite early on, remember
+                // to clear it out when we shut down.
+                AddShutdownHandler(PyScopeManager.Global.Clear);
+
+                if (setSysArgv)
+                {
+                    Py.SetArgv(args);
+                }
 
                 // register the atexit callback (this doesn't use Py_AtExit as the C atexit
                 // callbacks are called after python is fully finalized but the python ones
@@ -156,11 +190,7 @@ namespace Python.Runtime
                 string code =
                     "import atexit, clr\n" +
                     "atexit.register(clr._AtExit)\n";
-                PyObject r = PythonEngine.RunString(code);
-                if (r != null)
-                {
-                    r.Dispose();
-                }
+                PythonEngine.Exec(code);
 
                 // Load the clr.py resource into the clr module
                 IntPtr clr = Python.Runtime.ImportHook.GetCLRModule();
@@ -180,12 +210,7 @@ namespace Python.Runtime
                     {
                         // add the contents of clr.py to the module
                         string clr_py = reader.ReadToEnd();
-                        PyObject result = RunString(clr_py, module_globals, locals.Handle);
-                        if (null == result)
-                        {
-                            throw new PythonException();
-                        }
-                        result.Dispose();
+                        Exec(clr_py, module_globals, locals.Handle);
                     }
 
                     // add the imported module to the clr module, and copy the API functions
@@ -209,6 +234,11 @@ namespace Python.Runtime
             }
         }
 
+        static void OnDomainUnload(object _, EventArgs __)
+        {
+            Shutdown();
+        }
+
         /// <summary>
         /// A helper to perform initialization from the context of an active
         /// CPython interpreter process - this bootstraps the managed runtime
@@ -222,7 +252,7 @@ namespace Python.Runtime
         {
             try
             {
-                Initialize();
+                Initialize(setSysArgv: false);
 
                 // Trickery - when the import hook is installed into an already
                 // running Python, the standard import machinery is still in
@@ -253,11 +283,7 @@ namespace Python.Runtime
                     "            exec(line)\n" +
                     "            break\n";
 
-                PyObject r = PythonEngine.RunString(code);
-                if (r != null)
-                {
-                    r.Dispose();
-                }
+                PythonEngine.Exec(code);
             }
             catch (PythonException e)
             {
@@ -284,11 +310,81 @@ namespace Python.Runtime
         {
             if (initialized)
             {
-                Runtime.Shutdown();
+                PyScopeManager.Global.Clear();
+                
+                // If the shutdown handlers trigger a domain unload,
+                // don't call shutdown again.
+                AppDomain.CurrentDomain.DomainUnload -= OnDomainUnload;
+
+                ExecuteShutdownHandlers();
+
                 initialized = false;
             }
         }
 
+        /// <summary>
+        /// Called when the engine is shut down.
+        ///
+        /// Shutdown handlers are run in reverse order they were added, so that
+        /// resources available when running a shutdown handler are the same as
+        /// what was available when it was added.
+        /// </summary>
+        public delegate void ShutdownHandler();
+
+        static List<ShutdownHandler> ShutdownHandlers = new List<ShutdownHandler>();
+
+        /// <summary>
+        /// Add a function to be called when the engine is shut down.
+        ///
+        /// Shutdown handlers are executed in the opposite order they were
+        /// added, so that you can be sure that everything that was initialized
+        /// when you added the handler is still initialized when you need to shut
+        /// down.
+        ///
+        /// If the same shutdown handler is added several times, it will be run
+        /// several times.
+        ///
+        /// Don't add shutdown handlers while running a shutdown handler.
+        /// </summary>
+        public static void AddShutdownHandler(ShutdownHandler handler)
+        {
+            ShutdownHandlers.Add(handler);
+        }
+
+        /// <summary>
+        /// Remove a shutdown handler.
+        ///
+        /// If the same shutdown handler is added several times, only the last
+        /// one is removed.
+        ///
+        /// Don't remove shutdown handlers while running a shutdown handler.
+        /// </summary>
+        public static void RemoveShutdownHandler(ShutdownHandler handler)
+        {
+            for (int index = ShutdownHandlers.Count - 1; index >= 0; --index)
+            {
+                if (ShutdownHandlers[index] == handler)
+                {
+                    ShutdownHandlers.RemoveAt(index);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Run all the shutdown handlers.
+        ///
+        /// They're run in opposite order they were added.
+        /// </summary>
+        static void ExecuteShutdownHandlers()
+        {
+            while(ShutdownHandlers.Count > 0)
+            {
+                var handler = ShutdownHandlers[ShutdownHandlers.Count - 1];
+                ShutdownHandlers.RemoveAt(ShutdownHandlers.Count - 1);
+                handler();
+            }
+        }
 
         /// <summary>
         /// AcquireLock Method
@@ -368,7 +464,7 @@ namespace Python.Runtime
         public static PyObject ImportModule(string name)
         {
             IntPtr op = Runtime.PyImport_ImportModule(name);
-            Py.Throw();
+            Runtime.CheckExceptionOccurred();
             return new PyObject(op);
         }
 
@@ -383,7 +479,7 @@ namespace Python.Runtime
         public static PyObject ReloadModule(PyObject module)
         {
             IntPtr op = Runtime.PyImport_ReloadModule(module.Handle);
-            Py.Throw();
+            Runtime.CheckExceptionOccurred();
             return new PyObject(op);
         }
 
@@ -398,24 +494,71 @@ namespace Python.Runtime
         public static PyObject ModuleFromString(string name, string code)
         {
             IntPtr c = Runtime.Py_CompileString(code, "none", (IntPtr)257);
-            Py.Throw();
+            Runtime.CheckExceptionOccurred();
             IntPtr m = Runtime.PyImport_ExecCodeModule(name, c);
-            Py.Throw();
+            Runtime.CheckExceptionOccurred();
             return new PyObject(m);
+        }
+
+        public static PyObject Compile(string code, string filename = "", RunFlagType mode = RunFlagType.File)
+        {
+            var flag = (IntPtr)mode;
+            IntPtr ptr = Runtime.Py_CompileString(code, filename, flag);
+            Runtime.CheckExceptionOccurred();
+            return new PyObject(ptr);
+        }
+
+        /// <summary>
+        /// Eval Method
+        /// </summary>
+        /// <remarks>
+        /// Evaluate a Python expression and returns the result.
+        /// It's a subset of Python eval function.
+        /// </remarks>
+        public static PyObject Eval(string code, IntPtr? globals = null, IntPtr? locals = null)
+        {
+            PyObject result = RunString(code, globals, locals, RunFlagType.Eval);
+            return result;
         }
 
 
         /// <summary>
-        /// RunString Method
+        /// Exec Method
+        /// </summary>
+        /// <remarks>
+        /// Run a string containing Python code.
+        /// It's a subset of Python exec function.
+        /// </remarks>
+        public static void Exec(string code, IntPtr? globals = null, IntPtr? locals = null)
+        {
+            PyObject result = RunString(code, globals, locals, RunFlagType.File);
+            if (result.obj != Runtime.PyNone)
+            {
+                throw new PythonException();
+            }
+            result.Dispose();
+        }
+
+
+        /// <summary>
+        /// RunString Method. Function has been deprecated and will be removed.
+        /// Use Exec/Eval/RunSimpleString instead.
+        /// </summary>
+        [Obsolete("RunString is deprecated and will be removed. Use Exec/Eval/RunSimpleString instead.")]
+        public static PyObject RunString(string code, IntPtr? globals = null, IntPtr? locals = null)
+        {
+            return RunString(code, globals, locals, RunFlagType.File);
+        }
+
+        /// <summary>
+        /// Internal RunString Method.
         /// </summary>
         /// <remarks>
         /// Run a string containing Python code. Returns the result of
         /// executing the code string as a PyObject instance, or null if
         /// an exception was raised.
         /// </remarks>
-        public static PyObject RunString(
-            string code, IntPtr? globals = null, IntPtr? locals = null
-        )
+        internal static PyObject RunString(string code, IntPtr? globals, IntPtr? locals, RunFlagType flag)
         {
             var borrowedGlobals = true;
             if (globals == null)
@@ -431,38 +574,37 @@ namespace Python.Runtime
                     borrowedGlobals = false;
                 }
             }
-
-            var borrowedLocals = true;
+            
             if (locals == null)
             {
-                locals = Runtime.PyDict_New();
-                borrowedLocals = false;
+                locals = globals;
             }
-
-            var flag = (IntPtr)257; /* Py_file_input */
 
             try
             {
                 IntPtr result = Runtime.PyRun_String(
-                    code, flag, globals.Value, locals.Value
+                    code, (IntPtr)flag, globals.Value, locals.Value
                 );
 
-                Py.Throw();
+                Runtime.CheckExceptionOccurred();
 
                 return new PyObject(result);
             }
             finally
             {
-                if (!borrowedLocals)
-                {
-                    Runtime.XDecref(locals.Value);
-                }
                 if (!borrowedGlobals)
                 {
                     Runtime.XDecref(globals.Value);
                 }
             }
         }
+    }
+
+    public enum RunFlagType
+    {
+        Single = 256,
+        File = 257, /* Py_file_input */
+        Eval = 258
     }
 
     public static class Py
@@ -477,6 +619,18 @@ namespace Python.Runtime
             return new GILState();
         }
 
+        public static PyScope CreateScope()
+        {
+            var scope = PyScopeManager.Global.Create();
+            return scope;
+        }
+
+        public static PyScope CreateScope(string name)
+        {
+            var scope = PyScopeManager.Global.Create(name);
+            return scope;
+        }
+        
         public class GILState : IDisposable
         {
             private IntPtr state;
@@ -567,19 +721,37 @@ namespace Python.Runtime
             {
                 string[] arr = argv.ToArray();
                 Runtime.PySys_SetArgvEx(arr.Length, arr, 0);
-                Py.Throw();
+                Runtime.CheckExceptionOccurred();
             }
         }
 
-        internal static void Throw()
+        public static void With(PyObject obj, Action<dynamic> Body)
         {
-            using (GIL())
+            // Behavior described here: 
+            // https://docs.python.org/2/reference/datamodel.html#with-statement-context-managers
+
+            IntPtr type = Runtime.PyNone;
+            IntPtr val = Runtime.PyNone;
+            IntPtr traceBack = Runtime.PyNone;
+            PythonException ex = null;
+
+            try
             {
-                if (Runtime.PyErr_Occurred() != 0)
-                {
-                    throw new PythonException();
-                }
+                PyObject enterResult = obj.InvokeMethod("__enter__");
+
+                Body(enterResult);
             }
+            catch (PythonException e)
+            {
+                ex = e;
+                type = ex.PyType;
+                val = ex.PyValue;
+                traceBack = ex.PyTB;
+            }
+
+            var exitResult = obj.InvokeMethod("__exit__", new PyObject(type), new PyObject(val), new PyObject(traceBack));
+
+            if (ex != null && !exitResult.IsTrue()) throw ex;
         }
     }
 }

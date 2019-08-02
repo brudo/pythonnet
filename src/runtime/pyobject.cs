@@ -1,10 +1,17 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Dynamic;
 using System.Linq.Expressions;
 
 namespace Python.Runtime
 {
+    public interface IPyDisposable : IDisposable
+    {
+        IntPtr[] GetTrackedHandles();
+    }
+
     /// <summary>
     /// Represents a generic Python object. The methods of this class are
     /// generally equivalent to the Python "abstract object API". See
@@ -12,10 +19,18 @@ namespace Python.Runtime
     /// PY3: https://docs.python.org/3/c-api/object.html
     /// for details.
     /// </summary>
-    public class PyObject : DynamicObject, IDisposable
+    public class PyObject : DynamicObject, IEnumerable, IPyDisposable
     {
+#if TRACE_ALLOC
+        /// <summary>
+        /// Trace stack for PyObject's construction
+        /// </summary>
+        public StackTrace Traceback { get; private set; }
+#endif  
+
         protected internal IntPtr obj = IntPtr.Zero;
         private bool disposed = false;
+        private bool _finalized = false;
 
         /// <summary>
         /// PyObject Constructor
@@ -29,6 +44,9 @@ namespace Python.Runtime
         public PyObject(IntPtr ptr)
         {
             obj = ptr;
+#if TRACE_ALLOC
+            Traceback = new StackTrace(1);
+#endif
         }
 
         // Protected default constructor to allow subclasses to manage
@@ -36,14 +54,26 @@ namespace Python.Runtime
 
         protected PyObject()
         {
+#if TRACE_ALLOC
+            Traceback = new StackTrace(1);
+#endif
         }
 
         // Ensure that encapsulated Python object is decref'ed appropriately
         // when the managed wrapper is garbage-collected.
-
         ~PyObject()
         {
-            Dispose();
+            if (obj == IntPtr.Zero)
+            {
+                return;
+            }
+            if (_finalized || disposed)
+            {
+                return;
+            }
+            // Prevent a infinity loop by calling GC.WaitForPendingFinalizers
+            _finalized = true;
+            Finalizer.Instance.AddFinalizedObject(this);
         }
 
 
@@ -97,6 +127,27 @@ namespace Python.Runtime
             return result;
         }
 
+        /// <summary>
+        /// As Method
+        /// </summary>
+        /// <remarks>
+        /// Return a managed object of the given type, based on the
+        /// value of the Python object.
+        /// </remarks>
+        public T As<T>()
+        {
+            if (typeof(T) == typeof(PyObject) || typeof(T) == typeof(object))
+            {
+                return (T)(this as object);
+            }
+            object result;
+            if (!Converter.ToManaged(obj, typeof(T), out result, false))
+            {
+                throw new InvalidCastException("cannot convert object to target type");
+            }
+            return (T)result;
+        }
+
 
         /// <summary>
         /// Dispose Method
@@ -130,6 +181,10 @@ namespace Python.Runtime
             GC.SuppressFinalize(this);
         }
 
+        public IntPtr[] GetTrackedHandles()
+        {
+            return new IntPtr[] { obj };
+        }
 
         /// <summary>
         /// GetPythonType Method
@@ -493,9 +548,9 @@ namespace Python.Runtime
         /// Returns the length for objects that support the Python sequence
         /// protocol, or 0 if the object does not support the protocol.
         /// </remarks>
-        public virtual int Length()
+        public virtual long Length()
         {
-            int s = Runtime.PyObject_Size(obj);
+            var s = Runtime.PyObject_Size(obj);
             if (s < 0)
             {
                 Runtime.PyErr_Clear();
@@ -781,7 +836,7 @@ namespace Python.Runtime
         /// </remarks>
         public bool IsIterable()
         {
-            return Runtime.PyIter_Check(obj);
+            return Runtime.PyObject_IsIterable(obj);
         }
 
 
@@ -884,33 +939,63 @@ namespace Python.Runtime
         /// </remarks>
         public override int GetHashCode()
         {
-            return Runtime.PyObject_Hash(obj).ToInt32();
+            return ((ulong)Runtime.PyObject_Hash(obj)).GetHashCode();
         }
+
+
+        public long Refcount
+        {
+            get
+            {
+                return Runtime.Refcount(obj);
+            }
+        }
+
 
         public override bool TryGetMember(GetMemberBinder binder, out object result)
         {
-            if (this.HasAttr(binder.Name))
-            {
-                result = CheckNone(this.GetAttr(binder.Name));
-                return true;
-            }
-            else
-            {
-                return base.TryGetMember(binder, out result);
-            }
+            result = CheckNone(this.GetAttr(binder.Name));
+            return true;
         }
 
         public override bool TrySetMember(SetMemberBinder binder, object value)
         {
-            if (this.HasAttr(binder.Name))
+            IntPtr ptr = Converter.ToPython(value, value?.GetType());
+            int r = Runtime.PyObject_SetAttrString(obj, binder.Name, ptr);
+            if (r < 0)
             {
-                this.SetAttr(binder.Name, (PyObject)value);
-                return true;
+                throw new PythonException();
             }
-            else
+            Runtime.XDecref(ptr);
+            return true;
+        }
+
+        private void GetArgs(object[] inargs, CallInfo callInfo, out PyTuple args, out PyDict kwargs)
+        {
+            if (callInfo == null || callInfo.ArgumentNames.Count == 0)
             {
-                return base.TrySetMember(binder, value);
+                GetArgs(inargs, out args, out kwargs);
+                return;
             }
+
+            // Support for .net named arguments
+            var namedArgumentCount = callInfo.ArgumentNames.Count;
+            var regularArgumentCount = callInfo.ArgumentCount - namedArgumentCount;
+
+            var argTuple = Runtime.PyTuple_New(regularArgumentCount);
+            for (int i = 0; i < regularArgumentCount; ++i)
+            {
+                AddArgument(argTuple, i, inargs[i]);
+            }
+            args = new PyTuple(argTuple);
+
+            var namedArgs = new object[namedArgumentCount * 2];
+            for (int i = 0; i < namedArgumentCount; ++i)
+            {
+                namedArgs[i * 2] = callInfo.ArgumentNames[i];
+                namedArgs[i * 2 + 1] = inargs[regularArgumentCount + i];
+            }
+            kwargs = Py.kw(namedArgs);
         }
 
         private void GetArgs(object[] inargs, out PyTuple args, out PyDict kwargs)
@@ -923,22 +1008,10 @@ namespace Python.Runtime
             IntPtr argtuple = Runtime.PyTuple_New(arg_count);
             for (var i = 0; i < arg_count; i++)
             {
-                IntPtr ptr;
-                if (inargs[i] is PyObject)
-                {
-                    ptr = ((PyObject)inargs[i]).Handle;
-                    Runtime.XIncref(ptr);
-                }
-                else
-                {
-                    ptr = Converter.ToPython(inargs[i], inargs[i]?.GetType());
-                }
-                if (Runtime.PyTuple_SetItem(argtuple, i, ptr) < 0)
-                {
-                    throw new PythonException();
-                }
+                AddArgument(argtuple, i, inargs[i]);
             }
             args = new PyTuple(argtuple);
+
             kwargs = null;
             for (int i = arg_count; i < inargs.Length; i++)
             {
@@ -957,6 +1030,32 @@ namespace Python.Runtime
             }
         }
 
+        private static void AddArgument(IntPtr argtuple, int i, object target)
+        {
+            IntPtr ptr = GetPythonObject(target);
+
+            if (Runtime.PyTuple_SetItem(argtuple, i, ptr) < 0)
+            {
+                throw new PythonException();
+            }
+        }
+
+        private static IntPtr GetPythonObject(object target)
+        {
+            IntPtr ptr;
+            if (target is PyObject)
+            {
+                ptr = ((PyObject)target).Handle;
+                Runtime.XIncref(ptr);
+            }
+            else
+            {
+                ptr = Converter.ToPython(target, target?.GetType());
+            }
+
+            return ptr;
+        }
+
         public override bool TryInvokeMember(InvokeMemberBinder binder, object[] args, out object result)
         {
             if (this.HasAttr(binder.Name) && this.GetAttr(binder.Name).IsCallable())
@@ -965,7 +1064,7 @@ namespace Python.Runtime
                 PyDict kwargs = null;
                 try
                 {
-                    GetArgs(args, out pyargs, out kwargs);
+                    GetArgs(args, binder.CallInfo, out pyargs, out kwargs);
                     result = CheckNone(InvokeMethod(binder.Name, pyargs, kwargs));
                 }
                 finally
@@ -995,7 +1094,7 @@ namespace Python.Runtime
                 PyDict kwargs = null;
                 try
                 {
-                    GetArgs(args, out pyargs, out kwargs);
+                    GetArgs(args, binder.CallInfo, out pyargs, out kwargs);
                     result = CheckNone(Invoke(pyargs, kwargs));
                 }
                 finally
@@ -1051,10 +1150,10 @@ namespace Python.Runtime
                     res = Runtime.PyNumber_InPlaceMultiply(this.obj, ((PyObject)arg).obj);
                     break;
                 case ExpressionType.Divide:
-                    res = Runtime.PyNumber_Divide(this.obj, ((PyObject)arg).obj);
+                    res = Runtime.PyNumber_TrueDivide(this.obj, ((PyObject)arg).obj);
                     break;
                 case ExpressionType.DivideAssign:
-                    res = Runtime.PyNumber_InPlaceDivide(this.obj, ((PyObject)arg).obj);
+                    res = Runtime.PyNumber_InPlaceTrueDivide(this.obj, ((PyObject)arg).obj);
                     break;
                 case ExpressionType.And:
                     res = Runtime.PyNumber_And(this.obj, ((PyObject)arg).obj);
@@ -1168,6 +1267,21 @@ namespace Python.Runtime
             }
             result = CheckNone(new PyObject(res));
             return true;
+        }
+
+        /// <summary>
+        /// Returns the enumeration of all dynamic member names.
+        /// </summary>
+        /// <remarks>
+        /// This method exists for debugging purposes only.
+        /// </remarks>
+        /// <returns>A sequence that contains dynamic member names.</returns>
+        public override IEnumerable<string> GetDynamicMemberNames()
+        {
+            foreach (PyObject pyObj in Dir())
+            {
+                yield return pyObj.ToString();
+            }
         }
     }
 }

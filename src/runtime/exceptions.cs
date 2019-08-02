@@ -2,7 +2,6 @@ using System;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-
 namespace Python.Runtime
 {
     /// <summary>
@@ -134,10 +133,10 @@ namespace Python.Runtime
         /// __getattr__ implementation, and thus dereferencing a NULL
         /// pointer.
         /// </summary>
-        /// <param name="e">A CLR exception</param>
         /// <param name="ob">The python object wrapping </param>
         internal static void SetArgsAndCause(IntPtr ob)
         {
+            // e: A CLR Exception
             Exception e = ExceptionClassObject.ToException(ob);
             if (e == null)
             {
@@ -171,7 +170,7 @@ namespace Python.Runtime
         /// Shortcut for (pointer == NULL) -&gt; throw PythonException
         /// </summary>
         /// <param name="pointer">Pointer to a Python object</param>
-        internal static unsafe void ErrorCheck(IntPtr pointer)
+        internal static void ErrorCheck(IntPtr pointer)
         {
             if (pointer == IntPtr.Zero)
             {
@@ -182,7 +181,7 @@ namespace Python.Runtime
         /// <summary>
         /// Shortcut for (pointer == NULL or ErrorOccurred()) -&gt; throw PythonException
         /// </summary>
-        internal static unsafe void ErrorOccurredCheck(IntPtr pointer)
+        internal static void ErrorOccurredCheck(IntPtr pointer)
         {
             if (pointer == IntPtr.Zero || ErrorOccurred())
             {
@@ -257,7 +256,10 @@ namespace Python.Runtime
             var pe = e as PythonException;
             if (pe != null)
             {
-                Runtime.PyErr_SetObject(pe.PyType, pe.PyValue);
+                Runtime.XIncref(pe.PyType);
+                Runtime.XIncref(pe.PyValue);
+                Runtime.XIncref(pe.PyTB);
+                Runtime.PyErr_Restore(pe.PyType, pe.PyValue, pe.PyTB);
                 return;
             }
 
@@ -277,7 +279,7 @@ namespace Python.Runtime
         /// </remarks>
         public static bool ErrorOccurred()
         {
-            return Runtime.PyErr_Occurred() != 0;
+            return Runtime.PyErr_Occurred() != IntPtr.Zero;
         }
 
         /// <summary>

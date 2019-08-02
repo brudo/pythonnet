@@ -32,8 +32,14 @@ namespace Python.Test
 
         public byte[] ByteArrayField;
         public sbyte[] SByteArrayField;
+
+        public T? Echo<T>(T? arg) where T: struct {
+            return arg;
+        }
+
     }
 
+    
 
     public interface ISpam
     {
@@ -50,6 +56,21 @@ namespace Python.Test
         }
 
         public string GetValue()
+        {
+            return value;
+        }
+    }
+    
+    public class UnicodeString
+    {
+        public string value = "안녕";
+
+        public string GetString()
+        {
+            return value;
+        }
+
+        public override string ToString()
         {
             return value;
         }

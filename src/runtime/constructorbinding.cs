@@ -75,21 +75,18 @@ namespace Python.Runtime
                     return Exceptions.RaiseTypeError("How in the world could that happen!");
                 }
             }*/
-            Runtime.XIncref(self.pyHandle); // Decref'd by the interpreter.
+            Runtime.XIncref(self.pyHandle);
             return self.pyHandle;
         }
 
         /// <summary>
         /// Implement explicit overload selection using subscript syntax ([]).
         /// </summary>
-        /// <summary>
+        /// <remarks>
         /// ConstructorBinding.GetItem(PyObject *o, PyObject *key)
         /// Return element of o corresponding to the object key or NULL on failure.
         /// This is the equivalent of the Python expression o[key].
-        /// </summary>
-        /// <param name="tp"></param>
-        /// <param name="idx"></param>
-        /// <returns></returns>
+        /// </remarks>
         public static IntPtr mp_subscript(IntPtr op, IntPtr key)
         {
             var self = (ConstructorBinding)GetManagedObject(op);
@@ -104,13 +101,10 @@ namespace Python.Runtime
             ConstructorInfo ci = self.type.GetConstructor(types);
             if (ci == null)
             {
-                var msg = "No match found for constructor signature";
-                return Exceptions.RaiseTypeError(msg);
+                return Exceptions.RaiseTypeError("No match found for constructor signature");
             }
             var boundCtor = new BoundContructor(self.type, self.pyTypeHndl, self.ctorBinder, ci);
 
-            /* Since nothing is cached, do we need the increment???
-            Runtime.XIncref(boundCtor.pyHandle);  // Decref'd by the interpreter??? */
             return boundCtor.pyHandle;
         }
 
@@ -184,7 +178,7 @@ namespace Python.Runtime
         /// <summary>
         /// BoundContructor.__call__(PyObject *callable_object, PyObject *args, PyObject *kw)
         /// </summary>
-        /// <param name="ob"> PyObject *callable_object </param>
+        /// <param name="op"> PyObject *callable_object </param>
         /// <param name="args"> PyObject *args </param>
         /// <param name="kw"> PyObject *kw </param>
         /// <returns> A reference to a new instance of the class by invoking the selected ctor(). </returns>

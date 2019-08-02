@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -189,10 +190,17 @@ namespace Python.Runtime
             foreach (string name in AssemblyManager.GetNames(_namespace))
             {
                 cache.TryGetValue(name, out m);
-                if (m == null)
+                if (m != null)
                 {
-                    ManagedType attr = GetAttribute(name, true);
+                    continue;
                 }
+                IntPtr attr = Runtime.PyDict_GetItemString(dict, name);
+                // If __dict__ has already set a custom property, skip it.
+                if (attr != IntPtr.Zero)
+                {
+                    continue;
+                }
+                GetAttribute(name, true);
             }
         }
 
@@ -327,6 +335,17 @@ namespace Python.Runtime
             }
         }
 
+        public static void Reset()
+        {
+            hacked = false;
+            interactive_preload = true;
+            preload = false;
+
+            // XXX Test performance of new features //
+            _SuppressDocs = false;
+            _SuppressOverloads = false;
+        }
+
         /// <summary>
         /// The initializing of the preload hook has to happen as late as
         /// possible since sys.ps1 is created after the CLR module is
@@ -396,10 +415,27 @@ namespace Python.Runtime
             }
             if (assembly == null)
             {
-                throw new System.IO.FileNotFoundException($"Unable to find assembly '{name}'.");
+                throw new FileNotFoundException($"Unable to find assembly '{name}'.");
             }
 
             return assembly;
+        }
+
+        /// <summary>
+        /// Get a Type instance for a class object.
+        /// clr.GetClrType(IComparable) gives you the Type for IComparable,
+        /// that you can e.g. perform reflection on. Similar to typeof(IComparable) in C#
+        /// or clr.GetClrType(IComparable) in IronPython.
+        /// 
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns>The Type object</returns>
+
+        [ModuleFunction]
+        [ForbidPythonThreads]
+        public static Type GetClrType(Type type)
+        {
+            return type;
         }
 
         [ModuleFunction]

@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 
-import unittest
+"""Test sys.argv state."""
+
 import sys
 
-class SysArgvTests(unittest.TestCase):
-    """Test sys.argv state."""
-
-    def test_sys_argv_state(self):
-        """Test sys.argv state doesn't change after clr import."""
-        argv = sys.argv
-        import clr
-        self.assertTrue(argv == sys.argv)
+from ._compat import check_output
 
 
-def test_suite():
-    return unittest.makeSuite(SysArgvTests)
+def test_sys_argv_state(filepath):
+    """Test sys.argv state doesn't change after clr import.
+    To better control the arguments being passed, test on a fresh python
+    instance with specific arguments"""
+
+    script = filepath("argv-fixture.py")
+    out = check_output([sys.executable, script, "foo", "bar"])
+    assert "foo" in out
+    assert "bar" in out

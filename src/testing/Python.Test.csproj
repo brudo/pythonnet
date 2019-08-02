@@ -13,8 +13,8 @@
     <TargetFrameworkProfile />
     <NoWarn>1591,0067</NoWarn>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\</SolutionDir>
-    <PythonBuildDir Condition=" '$(PythonBuildDir)' == '' ">$(SolutionDir)</PythonBuildDir>
-    <!--If need to freeze language version: <LangVersion>5</LangVersion> !-->
+    <PythonBuildDir Condition=" '$(PythonBuildDir)' == '' ">$(SolutionDir)\bin\</PythonBuildDir>
+    <LangVersion>6</LangVersion>
     <SignAssembly>false</SignAssembly>
     <AssemblyOriginatorKeyFile>..\pythonnet.snk</AssemblyOriginatorKeyFile>
     <ErrorReport>prompt</ErrorReport>
@@ -31,7 +31,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseMono'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -41,7 +42,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseWin'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -51,7 +53,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseMonoPY3'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -61,7 +64,8 @@
     <DebugType>full</DebugType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'ReleaseWinPY3'">
-    <DefineConstants Condition="'$(DefineConstants)' == ''"></DefineConstants>
+    <DefineConstants Condition="'$(DefineConstants)' == ''">
+    </DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
@@ -79,6 +83,7 @@
     <Compile Include="generictest.cs" />
     <Compile Include="globaltest.cs" />
     <Compile Include="indexertest.cs" />
+    <Compile Include="InheritanceTest.cs" />
     <Compile Include="interfacetest.cs" />
     <Compile Include="methodtest.cs" />
     <Compile Include="moduletest.cs" />
@@ -103,7 +108,7 @@
     <TargetAssemblyPdb>$(TargetDir)$(TargetName).pdb</TargetAssemblyPdb>
   </PropertyGroup>
   <Target Name="AfterBuild">
-    <Copy SourceFiles="$(TargetAssembly)" DestinationFolder="$(PythonBuildDir)" />
-    <Copy SourceFiles="$(TargetAssemblyPdb)" Condition="Exists('$(TargetAssemblyPdb)')" DestinationFolder="$(PythonBuildDir)" />
+    <Copy SourceFiles="$(TargetAssembly)" DestinationFolder="$(SolutionDir)\src\tests\fixtures" />
+    <!--Copy SourceFiles="$(TargetAssemblyPdb)" Condition="Exists('$(TargetAssemblyPdb)')" DestinationFolder="$(PythonBuildDir)" /-->
   </Target>
 </Project>
